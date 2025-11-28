@@ -1,10 +1,3 @@
-#llm_train.py
-#============================
-# NLP 2025 实验任务4: 大模型微调文本分类 (LoRA + Phi-3)
-# =============================================
-# LLM 在微调（Fine-tuning）时，默认的训练目标是序列生成，而不是多分类预测。
-# --- 0. 导入必要的库 ---
-
 print("--- 0. 导入必要的库 ---")
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, Trainer, TrainingArguments
@@ -13,89 +6,55 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training, Pe
 import pandas as pd
 import numpy as np
 import os
-
-# --- 关键修复：手动添加 DynamicCache 缺失的方法 ---
-print("--- 应用 DynamicCache 兼容性修复 ---")
 from transformers.cache_utils import DynamicCache
-from typing import Optional  # 添加 Optional 类型支持
+from typing import Optional
 
-# 1. 首先确保添加获取序列长度的方法，这是其他方法的基础
+print("--- 应用 DynamicCache 兼容性修复 ---")
 if not hasattr(DynamicCache, "get_seq_length"):
     def get_seq_length(self, layer_idx: int = 0) -> int:
-        """返回指定层的缓存序列长度。"""
-        # 检查缓存是否存在且该层有内容
         if hasattr(self, "key_cache") and len(self.key_cache) > layer_idx:
             layer_cache = self.key_cache[layer_idx]
             if layer_cache is not None:
-                # 形状: [batch_size, num_heads, seq_len, head_dim]
-                return layer_cache.shape[-2]  # 返回序列长度
-        return 0  # 如果缓存不存在或为空，返回0
-
-
+                return layer_cache.shape[-2]
+        return 0
     DynamicCache.get_seq_length = get_seq_length
     print("✓ 已手动添加 get_seq_length 方法到 DynamicCache")
 
-# 2. 修复 get_max_length 方法 - 正确的类型注解
 if not hasattr(DynamicCache, "get_max_length"):
-    def get_max_length(self) -> Optional[int]:  # 使用 Optional[int] 而不是 int
-        """返回缓存状态的最大序列长度。DynamicCache 没有最大长度限制。"""
-        return None  # 对于 DynamicCache，返回 None 表示无限制
-
-
+    def get_max_length(self) -> Optional[int]:
+        return None
     DynamicCache.get_max_length = get_max_length
     print("✓ 已手动添加 get_max_length 方法到 DynamicCache")
 
-# 3. 修复 get_usable_length 方法，正确使用参数
 if not hasattr(DynamicCache, "get_usable_length"):
     def get_usable_length(self, new_seq_length: int, layer_idx: int = 0) -> int:
-        """
-        给定新输入的序列长度，返回缓存的可用长度。
-        这是 transformers 库中 Cache 基类的标准实现。
-        """
-        # 获取缓存的最大长度（DynamicCache 理论上无限制）
         max_length = self.get_max_length()
-        # 获取当前已缓存的序列长度
         previous_seq_length = self.get_seq_length(layer_idx)
-
-        # 如果缓存有大小限制，且总长度将超过限制，则计算可用长度
         if max_length is not None and previous_seq_length + new_seq_length > max_length:
             return max_length - new_seq_length
-        # 缓存无大小限制 -> 所有缓存都可用
         return previous_seq_length
-
-
     DynamicCache.get_usable_length = get_usable_length
     print("✓ 已手动添加 get_usable_length 方法到 DynamicCache")
 
 print("--- 0. 库导入完成 ---")
 
-# --- 1. 定义文件和模型路径 ---
 print("\n--- 1. 定义文件和模型路径 ---")
-
-# 数据集目录
 data_dir = r"D:\pycharm\PythonProjectllm\nlp-2025-experiment-task4"
 train_file = os.path.join(data_dir, "train.csv")
 test_file = os.path.join(data_dir, "test.csv")
-
-# !!! !!! 指定你本地 Phi-3 模型文件夹的完整路径 !!! !!!
 local_model_path = r"D:\HFLLM\hub\models--microsoft--Phi-3-mini-4k-instruct\snapshots\0a67737cc96d2554230f90338b163bc6380a2a85"
-
 print(f"数据集目录: {data_dir}")
 print(f"本地模型路径: {local_model_path}")
 print(f"训练文件: {train_file}")
 print(f"测试文件: {test_file}")
 
-# --- 2. 加载数据集 ---
 print("\n--- 2. 加载数据集 ---")
-
 train_df = None
 test_df = None
-
 try:
     print(f"尝试加载: {train_file}")
     train_df = pd.read_csv(train_file, encoding='utf-8', engine='python', encoding_errors='replace')
     print("train.csv 加载成功！")
-
     print(f"尝试加载: {test_file}")
     test_df = pd.read_csv(test_file, encoding='utf-8', engine='python', encoding_errors='replace')
     print("test.csv 加载成功！")
@@ -122,10 +81,9 @@ except KeyError as e:
     if test_df is not None: print(f"test.csv 实际列名: {test_df.columns.tolist()}")
     exit(1)
 
-# --- 2.1. 分割数据集 ---
 print("\n--- 2.1. 分割数据集 ---")
 if len(train_dataset) > 0:
-    split_dataset = train_dataset.train_test_split(test_size=0.1, seed=42)  # 10% 作为验证集
+    split_dataset = train_dataset.train_test_split(test_size=0.1, seed=42)
     train_dataset_split = split_dataset['train']
     eval_dataset_split = split_dataset['test']
     print(f"原训练集分割完成：")
@@ -135,11 +93,8 @@ else:
     print("错误：训练数据集为空，无法进行分割。")
     exit(1)
 
-# --- 3. 加载模型和分词器 (从本地) ---
 print("\n--- 3. 加载模型和分词器 (从本地) ---")
-
 print(f"正在尝试从本地加载模型和 Tokenizer: {local_model_path}")
-
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=True,
     bnb_4bit_quant_type="nf4",
@@ -164,7 +119,7 @@ try:
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
-        attn_implementation="eager"  # 强制使用eager注意力实现
+        attn_implementation="eager"
     )
     print(f"模型已在 {model.device} 上加载 (4-bit 量化)。")
 except Exception as e:
@@ -172,27 +127,16 @@ except Exception as e:
     print(f"请检查本地模型路径 '{local_model_path}' 是否包含正确的模型文件。")
     exit(1)
 
-# --- 4. 数据预处理 (分词) ---
 print("\n--- 4. 数据预处理 (分词) ---")
-
-# 定义所有可能的类别字符串
-unique_categories = ['PlayMusic', 'RateBook', 'SearchCreativeWork', 'GetWeather',
-                     'BookRestaurant', 'AddToPlaylist', 'SearchScreeningEvent']
+unique_categories = ['PlayMusic', 'RateBook', 'SearchCreativeWork', 'GetWeather', 'BookRestaurant', 'AddToPlaylist', 'SearchScreeningEvent']
 categories_string = ", ".join(unique_categories)
-
-# 创建类别映射字典
 category_to_id = {category: i for i, category in enumerate(unique_categories)}
 id_to_category = {i: category for category, i in category_to_id.items()}
-
 print(f"类别映射: {category_to_id}")
-
-
 
 def create_full_prompt(example):
     sentence = example["Sentence"]
     category = example["Category"]
-
-    # 严格的指令遵循Prompt模板
     instruction_template = (
         "<|user|>\n"
         "Classify the following sentence into exactly one of these categories: {categories_string}. "
@@ -200,42 +144,28 @@ def create_full_prompt(example):
         "Sentence: {sentence}\n\n"
         "Category: "
     )
-
-    # 构建完整的Prompt（不含结束符）
     full_prompt = instruction_template.format(
         categories_string=categories_string,
         sentence=sentence
     )
-
-    # 目标输出：仅类别名称（干净标签）
     target_output = category
-
-    # 完整训练文本：Prompt + 干净类别
     full_text = full_prompt + target_output
-
     return full_text
 
-
-# 测试Prompt生成
 test_example = {"Sentence": "What's the weather like today?", "Category": "GetWeather"}
 test_prompt = create_full_prompt(test_example)
 print("Prompt示例:")
 print(test_prompt)
 
-
 def tokenize_function(examples):
     texts = []
     labels_list = []
-
     for i in range(len(examples["Sentence"])):
-        # 为每个样本创建完整的Prompt训练文本
         full_text = create_full_prompt({
             "Sentence": examples["Sentence"][i],
             "Category": examples["Category"][i]
         })
         texts.append(full_text)
-
-        # 对完整文本进行分词
         tokenized_text = tokenizer(
             full_text,
             padding=False,
@@ -243,8 +173,6 @@ def tokenize_function(examples):
             max_length=256,
             return_tensors="pt"
         )
-
-        # 计算Prompt部分的长度（需要设置为-100）
         prompt_only = (
             "<|user|>\n"
             "Classify the following sentence into exactly one of these categories: {categories_string}. "
@@ -255,18 +183,12 @@ def tokenize_function(examples):
             categories_string=categories_string,
             sentence=examples["Sentence"][i]
         )
-
         prompt_tokens = tokenizer(prompt_only, return_tensors="pt", max_length=256, truncation=True)
         prompt_length = prompt_tokens["input_ids"].shape[1]
-
-        # 创建labels：Prompt部分为-100，类别部分保留原始ID
         input_ids = tokenized_text["input_ids"].squeeze(0)
         labels = input_ids.clone()
-        labels[:prompt_length] = -100  # 忽略Prompt部分的损失计算
-
+        labels[:prompt_length] = -100
         labels_list.append(labels)
-
-    # 批量处理文本
     tokenized_output = tokenizer(
         texts,
         padding="max_length",
@@ -274,17 +196,13 @@ def tokenize_function(examples):
         max_length=256,
         return_tensors="pt"
     )
-
-    # 手动处理labels的padding
     padded_labels = torch.nn.utils.rnn.pad_sequence(
         labels_list,
         batch_first=True,
-        padding_value=-100  # 使用-100进行padding
+        padding_value=-100
     )
-
     tokenized_output["labels"] = padded_labels
     return tokenized_output
-
 
 print("应用优化后的分词函数到训练集...")
 tokenized_train_dataset = train_dataset_split.map(
@@ -293,7 +211,6 @@ tokenized_train_dataset = train_dataset_split.map(
     remove_columns=train_dataset_split.column_names
 )
 print("训练集分词完成。")
-
 print("应用分词函数到验证集...")
 tokenized_eval_dataset = eval_dataset_split.map(
     tokenize_function,
@@ -302,11 +219,8 @@ tokenized_eval_dataset = eval_dataset_split.map(
 )
 print("验证集分词完成。")
 
-
 def tokenize_test_function(examples):
-    """测试集分词：只包含Prompt，不包含标签"""
     prompt_texts = []
-
     for i in range(len(examples["Sentence"])):
         prompt_only = (
             "<|user|>\n"
@@ -319,7 +233,6 @@ def tokenize_test_function(examples):
             sentence=examples["Sentence"][i]
         )
         prompt_texts.append(prompt_only)
-
     tokenized_output = tokenizer(
         prompt_texts,
         padding="max_length",
@@ -327,9 +240,7 @@ def tokenize_test_function(examples):
         max_length=256,
         return_tensors="pt"
     )
-
     return tokenized_output
-
 
 print("应用分词函数到测试集...")
 tokenized_test_dataset = test_dataset.map(
@@ -339,22 +250,14 @@ tokenized_test_dataset = test_dataset.map(
 )
 print("测试集分词完成。")
 
-# --- 5. 配置 LoRA ---
 print("\n--- 5. 配置 LoRA ---")
-
-# 关键修改：使用 Phi-3 模型的实际模块名称
 print("正在分析模型结构以找到正确的目标模块...")
 target_modules = []
 for name, module in model.named_modules():
     if any(key in name for key in ['q_proj', 'k_proj', 'v_proj', 'o_proj', 'gate_proj', 'up_proj', 'down_proj']):
-        target_modules.append(name.split('.')[-1])  # 只取最后一层名称
-
-# 去重并确保模块存在
-target_modules = list(set(target_modules))
-print(f"可用的目标模块: {target_modules}")
-
-# 使用找到的模块名称
-TARGET_MODULES = target_modules
+        target_modules.append(name.split('.')[-1])
+TARGET_MODULES = list(set(target_modules))
+print(f"可用的目标模块: {TARGET_MODULES}")
 
 lora_config = LoraConfig(
     r=8,
@@ -365,22 +268,15 @@ lora_config = LoraConfig(
     task_type="CAUSAL_LM",
 )
 print("LoRA 配置完成。")
-
 print("准备模型进行 4-bit 训练...")
-# 关键修改：禁用梯度检查点以避免DynamicCache问题
 model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=False)
-
 print("将 LoRA 适配器应用到模型...")
 model = get_peft_model(model, lora_config)
-
 print("\n--- LoRA 微调模型参数信息 ---")
 model.print_trainable_parameters()
 
-# --- 6. 定义训练参数并创建 Trainer ---
 print("\n--- 6. 定义训练参数并创建 Trainer ---")
 output_dir = "./phi3_text_classification_lora_finetuned"
-
-# 修复训练参数，禁用缓存以避免DynamicCache问题
 training_args = TrainingArguments(
     output_dir=output_dir,
     num_train_epochs=10,
@@ -392,35 +288,29 @@ training_args = TrainingArguments(
     logging_steps=10,
     eval_steps=50,
     save_steps=100,
-    eval_strategy="steps",  # 启用评估
+    eval_strategy="steps",
     save_strategy="steps",
-    load_best_model_at_end=True,  # 加载最佳模型
+    load_best_model_at_end=True,
     fp16=True,
     report_to="none",
     remove_unused_columns=False,
     dataloader_pin_memory=False,
 )
-
 print("训练参数定义完成。")
-
-# 准备 DataCollator
 from transformers import DataCollatorForLanguageModeling
-
 data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 print("DataCollator 准备完成。")
-
 print("\n创建 Trainer 对象...")
 trainer = Trainer(
     model=model,
     args=training_args,
     train_dataset=tokenized_train_dataset,
-    eval_dataset=tokenized_eval_dataset,  # 提供验证集
+    eval_dataset=tokenized_eval_dataset,
     tokenizer=tokenizer,
-    data_collator=data_collator,  # 使用DataCollator
+    data_collator=data_collator,
 )
 print("Trainer 对象创建成功。")
 
-# --- 7. 开始训练 ---
 print("\n=====================================")
 print("        开始 LoRA 微调训练         ")
 print("=====================================")
@@ -429,20 +319,16 @@ try:
     print("\n=====================================")
     print("        LoRA 微调训练完成！        ")
     print("=====================================")
-
     metrics = train_result.metrics
     print("训练指标:")
     for key, value in metrics.items():
         print(f"  {key}: {value:.4f}")
-
 except Exception as e:
     print(f"\n训练过程中发生错误: {e}")
     import traceback
-
     traceback.print_exc()
     exit(1)
 
-# --- 8. 保存模型 ---
 output_dir_for_saving = os.path.join(output_dir, "final_lora_adapters")
 print(f"\n正在将最终的 LoRA 适配器保存到: {output_dir_for_saving}")
 trainer.save_model(output_dir_for_saving)
