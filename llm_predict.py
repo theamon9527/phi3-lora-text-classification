@@ -1,4 +1,3 @@
-#llm_predict.py
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, Trainer, TrainingArguments
 from datasets import load_dataset, Dataset
@@ -8,28 +7,21 @@ import numpy as np
 import os
 from config import *
 
-
-# --- 9. 修复预测问题 ---
 print("\n=====================================")
 print("    开始使用 LoRA 模型进行预测      ")
 print("=====================================")
 
-# 关键修复：使用正确的预测方法
 print("加载微调后的模型进行预测...")
 
-# 重新加载基础模型和LoRA适配器
 try:
-    # 加载基础模型
     base_model = AutoModelForCausalLM.from_pretrained(
         local_model_path,
         quantization_config=bnb_config,
         device_map="auto",
         trust_remote_code=True,
         torch_dtype=torch.bfloat16,
-        attn_implementation="eager"  # 强制使用eager注意力实现
+        attn_implementation="eager"
     )
-
-    # 加载LoRA适配器
     model = PeftModel.from_pretrained(base_model, output_dir_for_saving)
     print("微调模型加载成功！")
 except Exception as e:
@@ -73,7 +65,6 @@ with torch.no_grad():
         example = test_dataset[i]
         sentence = example["Sentence"]
 
-        # 构建测试Prompt（与训练时一致）
         prompt_text = (
             "<|user|>\n"
             "Classify the following sentence into exactly one of these categories: {categories_string}. "
@@ -85,63 +76,50 @@ with torch.no_grad():
             sentence=sentence
         )
 
-        # Tokenize输入
         inputs = tokenizer(prompt_text, return_tensors="pt", max_length=256, truncation=True)
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
-        # 计算Prompt长度
         prompt_length = inputs["input_ids"].shape[1]
 
-        # 生成预测（使用贪婪搜索确保确定性输出）
         outputs = model.generate(
             **inputs,
-            max_new_tokens=15,  # 类别名称通常很短
-            do_sample=False,  # 关闭采样，使用贪婪搜索
+            max_new_tokens=15,
+            do_sample=False,
             temperature=0.1,
             pad_token_id=tokenizer.eos_token_id,
             eos_token_id=tokenizer.eos_token_id,
-            use_cache=False,  # 启用缓存以加速推理
+            use_cache=False,
         )
 
-        # 提取生成的部分（去除Prompt）
         generated_token_ids = outputs[0][prompt_length:]
 
-        # 解码生成的文本
         predicted_text = tokenizer.decode(generated_token_ids, skip_special_tokens=True).strip()
 
-        # 清理生成的文本：移除可能的多余内容
-        cleaned_prediction = predicted_text.split('\n')[0]  # 只取第一行
-        cleaned_prediction = cleaned_prediction.split('.')[0]  # 移除句点后的内容
+        cleaned_prediction = predicted_text.split('\n')[0]
+        cleaned_prediction = cleaned_prediction.split('.')[0]
         cleaned_prediction = cleaned_prediction.strip()
 
         print(f"样本ID {example['Id']} 原始生成: '{predicted_text}' -> 清理后: '{cleaned_prediction}'")
 
-        # 匹配已知类别 - 优化后的匹配逻辑
         final_category = "Unknown"
 
-        # 1. 严格开头匹配 (优先尝试)
         for category in unique_categories:
             if cleaned_prediction.lower().startswith(category.lower()):
                 final_category = category
                 break
 
-        # 2. 宽松匹配 (如果严格匹配失败)
         if final_category == "Unknown":
             for category in unique_categories:
-                # 检查类别名称是否出现在生成文本中
                 if category.lower() in cleaned_prediction.lower():
                     final_category = category
                     break
 
-        # 3. 针对 Unknown 的特殊处理（基于训练集的关键词匹配）
         if final_category == "Unknown":
             print(
                 f"  -> 识别为 'Unknown', 尝试特殊处理 (ID: {example['Id']}, Sentence: '{sentence}', Raw Gen: '{predicted_text}')")
 
-            # 基于训练集的关键词匹配
             lower_pred = cleaned_prediction.lower()
 
-            # 为每个类别定义关键词列表（从训练集中提取）
             keywords = {
                 "PlayMusic": ["play", "music", "song", "album", "track", "hear", "listen", "on deezer", "on spotify",
                               "on pandora", "on groove shark", "on last fm", "by artist", "singing", "playing"],
@@ -161,7 +139,6 @@ with torch.no_grad():
                                          "playing", "films", "cinema", "animated", "screening", "matinee", "showtime"]
             }
 
-            # 检查每个类别的关键词
             matched = False
             for category, keys in keywords.items():
                 for key in keys:
@@ -172,7 +149,6 @@ with torch.no_grad():
                 if matched:
                     break
 
-            # 如果仍然没有匹配，则默认为 SearchCreativeWork
             if final_category == "Unknown":
                 print(f"  -> 仍然 Unknown, 默认分类为 'SearchCreativeWork' (ID: {example['Id']})")
                 final_category = "SearchCreativeWork"
@@ -184,7 +160,6 @@ with torch.no_grad():
 
 print("预测完成！")
 
-# --- 10. 生成提交文件 ---
 print("\n开始生成提交文件...")
 
 submission_df = pd.DataFrame(preds_list)
