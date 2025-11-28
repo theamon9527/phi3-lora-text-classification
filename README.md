@@ -13,7 +13,7 @@
 - 部署能力：使用 **FastAPI** 提供 API 服务，并封装调用逻辑
 - 竞赛表现：在 Kaggle 竞赛中取得 **0.95452 高分**
 ---
-## 技术栈 & 
+## 技术栈
 - **大模型与微调**：Phi-3-mini-4k-instruct, Transformers, PEFT (LoRA)  
 - **量化加速**：BitsAndBytes 4-bit  
 - **数据处理**：pandas, numpy  
