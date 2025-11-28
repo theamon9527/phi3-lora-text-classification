@@ -1,4 +1,3 @@
-print("--- 0. 导入必要的库 ---")
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, Trainer, TrainingArguments
 from datasets import load_dataset, Dataset
