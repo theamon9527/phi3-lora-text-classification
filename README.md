@@ -18,7 +18,6 @@
 - **大模型与微调**：Phi-3-mini-4k-instruct, Transformers, PEFT (LoRA)  
 - **量化加速**：BitsAndBytes 4-bit  
 - **数据处理**：pandas, numpy  
-- **数据库**：MySQL, SQLAlchemy, pymysql  
 - **API 服务**：FastAPI, uvicorn  
 - **客户端交互**：requests  
 - **训练与推理**：PyTorch, Datasets
