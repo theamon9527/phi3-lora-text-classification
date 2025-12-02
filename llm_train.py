@@ -31,7 +31,7 @@ if not hasattr(DynamicCache, "get_max_length"):
         return None
 
     DynamicCache.get_max_length = get_max_length
-    logger.info("✓ 已手动添加 get_max_length 方法到 DynamicCache")
+    logger.info("已手动添加 get_max_length 方法到 DynamicCache")
 
 if not hasattr(DynamicCache, "get_usable_length"):
     def get_usable_length(self, new_seq_length: int, layer_idx: int = 0) -> int:
@@ -43,7 +43,7 @@ if not hasattr(DynamicCache, "get_usable_length"):
         return previous_seq_length
 
     DynamicCache.get_usable_length = get_usable_length
-    logger.info("✓ 已手动添加 get_usable_length 方法到 DynamicCache")
+    logger.info("已手动添加 get_usable_length 方法到 DynamicCache")
 
 logger.info("--- 0. 库导入完成 ---")
 
