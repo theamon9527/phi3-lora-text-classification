@@ -1,4 +1,3 @@
-# api_service.py
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
@@ -6,14 +5,21 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
 from config import *
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
 try:
     tokenizer = AutoTokenizer.from_pretrained(local_model_path, trust_remote_code=True)
-    print("Tokenizer 加载成功！")
+    logger.info("Tokenizer 加载成功！")
 except Exception as e:
-    print(f"加载 tokenizer 时出错: {e}")
+    logger.error(f"加载 tokenizer 时出错: {e}")
     exit(1)
 
 try:
@@ -27,9 +33,9 @@ try:
     )
     model = PeftModel.from_pretrained(base_model, output_dir_for_saving)
     model.eval()
-    print("微调模型加载成功！")
+    logger.info("微调模型加载成功！")
 except Exception as e:
-    print(f"加载微调模型时出错: {e}")
+    logger.error(f"加载微调模型时出错: {e}")
     exit(1)
 
 unique_categories = [
@@ -58,7 +64,7 @@ def predict_category(input: SentenceInput):
             **inputs,
             max_new_tokens=15,
             do_sample=False,
-            use_cache=False 
+            use_cache=False
         )
 
     pred = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True).strip()
