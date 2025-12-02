@@ -6,12 +6,18 @@ import pandas as pd
 import numpy as np
 import os
 from config import *
+import logging
 
-print("\n=====================================")
-print("    开始使用 LoRA 模型进行预测      ")
-print("=====================================")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
-print("加载微调后的模型进行预测...")
+
+logger.info("开始使用 LoRA 模型进行预测")
+
+logger.info("加载微调后的模型进行预测")
 
 try:
     base_model = AutoModelForCausalLM.from_pretrained(
@@ -22,41 +28,42 @@ try:
         torch_dtype=torch.bfloat16,
         attn_implementation="eager"
     )
+
     model = PeftModel.from_pretrained(base_model, output_dir_for_saving)
-    print("微调模型加载成功！")
+    logger.info("微调模型加载成功！")
 except Exception as e:
-    print(f"加载微调模型时发生错误: {e}")
+    logger.error(f"加载微调模型时发生错误: {e}")
     exit(1)
 
-print("\n--- 加载数据集 ---")
+logger.info("\n--- 加载数据集 ---")
 
 test_df = None
 
 try:
-    print(f"尝试加载: {test_file}")
+    logger.info(f"尝试加载: {test_file}")
     test_df = pd.read_csv(test_file, encoding='utf-8', engine='python', encoding_errors='replace')
-    print("test.csv 加载成功！")
+    logger.info("test.csv 加载成功！")
 except FileNotFoundError as e:
-    print(f"错误：文件未找到 - {e}")
-    print(f"请确保 'data_dir' 路径 '{data_dir}' 正确，并且包含 train.csv, test.csv 文件。")
+    logger.error(f"错误：文件未找到 - {e}")
+    logger.error(f"请确保 'data_dir' 路径 '{data_dir}' 正确，并且包含 train.csv, test.csv 文件。")
     exit(1)
 except Exception as e:
-    print(f"加载数据集时发生错误: {e}")
-    print("请检查文件的内容和编码。")
+    logger.error(f"加载数据集时发生错误: {e}")
+    logger.error("请检查文件的内容和编码。")
     exit(1)
 
 try:
-    print("检查并转换为 Hugging Face Dataset 格式...")
+    logger.info("检查并转换为 Hugging Face Dataset 格式...")
     test_dataset = Dataset.from_pandas(test_df[['Id', 'Sentence']])
-    print("数据集已转换为 Hugging Face Dataset 格式。")
+    logger.info("数据集已转换为 Hugging Face Dataset 格式。")
 except KeyError as e:
-    print(f"错误：在转换到 Dataset 时，找不到预期的列 - {e}")
-    print("\n请检查 CSV 文件中的列名是否正确：")
-    print("test.csv 应包含 'Id', 'Sentence' 列。")
-    if test_df is not None: print(f"test.csv 实际列名: {test_df.columns.tolist()}")
+    logger.error(f"错误：在转换到 Dataset 时，找不到预期的列 - {e}")
+    logger.error("\n请检查 CSV 文件中的列名是否正确：")
+    logger.error("test.csv 应包含 'Id', 'Sentence' 列。")
+    if test_df is not None: logger.error(f"test.csv 实际列名: {test_df.columns.tolist()}")
     exit(1)
 
-print("开始生成预测结果...")
+logger.info("开始生成预测结果...")
 preds_list = []
 
 model.eval()
@@ -99,7 +106,7 @@ with torch.no_grad():
         cleaned_prediction = cleaned_prediction.split('.')[0]
         cleaned_prediction = cleaned_prediction.strip()
 
-        print(f"样本ID {example['Id']} 原始生成: '{predicted_text}' -> 清理后: '{cleaned_prediction}'")
+        logger.info(f"样本ID {example['Id']} 原始生成: '{predicted_text}' -> 清理后: '{cleaned_prediction}'")
 
         final_category = "Unknown"
 
@@ -115,7 +122,7 @@ with torch.no_grad():
                     break
 
         if final_category == "Unknown":
-            print(
+            logger.info(
                 f"  -> 识别为 'Unknown', 尝试特殊处理 (ID: {example['Id']}, Sentence: '{sentence}', Raw Gen: '{predicted_text}')")
 
             lower_pred = cleaned_prediction.lower()
@@ -150,17 +157,17 @@ with torch.no_grad():
                     break
 
             if final_category == "Unknown":
-                print(f"  -> 仍然 Unknown, 默认分类为 'SearchCreativeWork' (ID: {example['Id']})")
+                logger.info(f"  -> 仍然 Unknown, 默认分类为 'SearchCreativeWork' (ID: {example['Id']})")
                 final_category = "SearchCreativeWork"
 
         preds_list.append({"Id": example["Id"], "Category": final_category})
 
         if i % 50 == 0:
-            print(f"已处理 {i + 1}/{len(test_dataset)} 个样本。当前最佳猜测: {final_category}")
+            logger.info(f"已处理 {i + 1}/{len(test_dataset)} 个样本。当前最佳猜测: {final_category}")
 
-print("预测完成！")
+logger.info("预测完成！")
 
-print("\n开始生成提交文件...")
+logger.info("\n开始生成提交文件...")
 
 submission_df = pd.DataFrame(preds_list)
 submission_df['Id'] = submission_df['Id'].astype(int)
@@ -169,13 +176,11 @@ submission_df = submission_df.sort_values(by='Id')
 submission_output_path = os.path.join(data_dir, "submission.csv")
 submission_df.to_csv(submission_output_path, index=False)
 
-print(f"提交文件已生成并保存到: {submission_output_path}")
-print("\n--- 提交文件预览 (前5行) ---")
-print(submission_df.head())
+logger.info(f"提交文件已生成并保存到: {submission_output_path}")
+logger.info("\n--- 提交文件预览 (前5行) ---")
+logger.info(f"\n{submission_df.head()}")
 
-print("\n--- 预测结果统计 ---")
-print(submission_df['Category'].value_counts())
+logger.info("\n--- 预测结果统计 ---")
+logger.info(f"\n{submission_df['Category'].value_counts()}")
 
-print("\n===================================================")
-print("    项目四（文本分类 LoRA + Phi-3）完整代码执行完毕！   ")
-print("===================================================")
+logger.info("文本分类 LoRA + Phi-3完整代码执行完毕")
