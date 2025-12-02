@@ -24,7 +24,7 @@ if not hasattr(DynamicCache, "get_seq_length"):
         return 0
 
     DynamicCache.get_seq_length = get_seq_length
-    logger.info("✓ 已手动添加 get_seq_length 方法到 DynamicCache")
+    logger.info("已手动添加 get_seq_length 方法到 DynamicCache")
 
 if not hasattr(DynamicCache, "get_max_length"):
     def get_max_length(self) -> Optional[int]:
